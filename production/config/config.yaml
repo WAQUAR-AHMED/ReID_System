@@ -56,7 +56,18 @@ database:
     # All credentials via .env: DB_HOST, DB_NAME, DB_USER, DB_PASSWORD, DB_PORT
 
 runtime:
-  tracker: "./bytetrack_consistent.yaml"   # tuned for TID consistency through occlusion; use "bytetrack.yaml" for ultralytics defaults
+  tracker: "./bytetrack_consistent.yaml"   # used when tracker_mode=bytetrack; tuned for TID consistency through occlusion. Use "bytetrack.yaml" for ultralytics defaults.
+  # Tracker selector. "bytetrack" = current behaviour (uses runtime.tracker).
+  # "botsort" = Kalman + motion prediction + camera-motion compensation, much
+  # sturdier through path crossings and short occlusions (uses runtime.botsort_tracker).
+  tracker_mode: "bytetrack"
+  botsort_tracker: "./botsort_consistent.yaml"
+  # When true, suppress gallery embedding updates for a track whose bbox
+  # heavily overlaps another live track (IoU >= occlusion_iou_thresh) in
+  # the same frame. Match search still runs; only enrollment / append are
+  # frozen so embeddings of overlapping people don't pollute a SID's gallery.
+  occlusion_freeze_embeddings: true
+  occlusion_iou_thresh: 0.35
   reid_backend: "fastreid"   # onnxruntime | tensorrt | fastreid
   no_display: false
   display_width: 1600

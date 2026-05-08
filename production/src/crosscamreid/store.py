@@ -19,6 +19,7 @@ class SIDStore:
         db_path: str | None = None,
         cloud_url: str | None = None,
         cloud_api_key: str | None = None,
+        wipe_collection: bool = False,
     ):
         self.collection = collection
         self.max_embeddings_per_sid = max_embeddings_per_sid
@@ -42,10 +43,26 @@ class SIDStore:
             path.mkdir(parents=True, exist_ok=True)
             self.client = QdrantClient(path=db_path)
 
+        if wipe_collection:
+            self._drop_collection_if_exists(collection, dim)
+
         self.collection = self._resolve_collection(collection, dim)
 
         self._next_sid, self._counts = self._scan_existing()
         print(f"[Qdrant] Next SID: {self._next_sid} (existing SIDs: {len(self._counts)})")
+
+    def _drop_collection_if_exists(self, name: str, dim: int) -> None:
+        """Delete just this collection (and its dim-suffixed sibling, if any).
+
+        Used when the caller wants to reset *only* its own gallery without
+        touching the rest of the local Qdrant directory — e.g. per-org reset
+        in the people-counting flow when ``database.qdrant.keep_db`` is false.
+        """
+        existing = {c.name for c in self.client.get_collections().collections}
+        for target in (name, f"{name}_d{dim}"):
+            if target in existing:
+                print(f"[Qdrant] Wiping existing collection: {target}")
+                self.client.delete_collection(collection_name=target)
 
     def _existing_dim(self, name: str) -> int | None:
         try:

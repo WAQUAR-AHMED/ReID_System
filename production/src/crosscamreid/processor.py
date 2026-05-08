@@ -50,6 +50,7 @@ def process_master(
     store: SIDStore,
     states: TIDStateManager,
     config: AppConfig,
+    occluded: bool = False,
 ) -> dict:
     tid = int(tid)
     kp_ok = keypoint_gate(kp_conf, config.gating)
@@ -84,7 +85,8 @@ def process_master(
 
     sample_interval = max(1, qualify_frames // max(1, enroll_frames))
     if (
-        state.qualified % sample_interval == 0
+        not occluded
+        and state.qualified % sample_interval == 0
         and len(state.embedding_buffer) < enroll_frames
     ):
         state.embedding_buffer.append(embedding)
@@ -93,6 +95,7 @@ def process_master(
     if matched_sid is not None and score >= config.gating.match_thresh:
         if config.enrollment.early_lock_on_match:
             state.locked_sid = matched_sid
+            state.lock_score = float(score)
             state.decided = True
             record["sid"] = matched_sid
             record["similarity_score"] = float(score)
@@ -110,9 +113,16 @@ def process_master(
     best_sid, best_score = _pick_best_voted_sid(state, qualify_frames)
     if best_sid is not None:
         state.locked_sid = best_sid
+        state.lock_score = float(best_score)
         state.decided = True
         record["sid"] = best_sid
         record["similarity_score"] = best_score
+        return record
+
+    # Don't seed a brand-new SID from an occluded crop — wait for a clean
+    # frame. The track stays UNKNOWN this tick and re-attempts enrollment
+    # once the bbox is no longer overlapping a peer.
+    if occluded:
         return record
 
     if not state.embedding_buffer:
@@ -125,6 +135,7 @@ def process_master(
     store.prune_outliers(new_sid)
 
     state.locked_sid = new_sid
+    state.lock_score = 1.0   # brand-new SID, no contest possible by construction
     state.decided = True
     record["sid"] = new_sid
     record["similarity_score"] = None
@@ -141,6 +152,7 @@ def process_master_roi(
     store: SIDStore,
     states: TIDStateManager,
     config: AppConfig,
+    occluded: bool = False,
 ) -> dict:
     """Master flow used inside an ROI: search first, enroll only on miss.
 
@@ -180,15 +192,22 @@ def process_master_roi(
     matched_sid, score = store.search_top1(embedding)
     if matched_sid is not None and score >= config.gating.match_thresh:
         state.locked_sid = matched_sid
+        state.lock_score = float(score)
         state.decided = True
         state.embedding_buffer.clear()
         record["sid"] = matched_sid
         record["similarity_score"] = float(score)
         return record
 
-    state.embedding_buffer.append(embedding)
     if score > 0:
         record["similarity_score"] = float(score)
+
+    # During heavy occlusion: don't append to the enrollment buffer and don't
+    # let an enrollment fire — wait for a clean frame.
+    if occluded:
+        return record
+
+    state.embedding_buffer.append(embedding)
 
     enroll_frames = config.enrollment.enroll_frames
     if len(state.embedding_buffer) < enroll_frames:
@@ -201,6 +220,7 @@ def process_master_roi(
     store.prune_outliers(new_sid)
 
     state.locked_sid = new_sid
+    state.lock_score = 1.0
     state.decided = True
     record["sid"] = new_sid
     record["similarity_score"] = None
@@ -253,6 +273,7 @@ def process_slave(
     if matched_sid is not None and score >= config.gating.match_thresh:
         if config.enrollment.early_lock_on_match:
             state.locked_sid = matched_sid
+            state.lock_score = float(score)
             state.decided = True
             record["sid"] = matched_sid
             return record
@@ -268,6 +289,7 @@ def process_slave(
     best_sid, best_score = _pick_best_voted_sid(state, qualify_frames)
     if best_sid is not None:
         state.locked_sid = best_sid
+        state.lock_score = float(best_score)
         state.decided = True
         record["sid"] = best_sid
         record["similarity_score"] = best_score

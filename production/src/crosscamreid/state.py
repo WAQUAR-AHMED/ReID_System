@@ -7,6 +7,7 @@ class TIDState:
     __slots__ = (
         "qualified",
         "locked_sid",
+        "lock_score",
         "match_votes",
         "embedding_buffer",
         "decided",
@@ -15,6 +16,10 @@ class TIDState:
     def __init__(self):
         self.qualified: int = 0
         self.locked_sid: int | None = None
+        # Similarity score recorded at the moment we locked to `locked_sid`.
+        # Used by per-frame conflict resolution to compare incumbents (no
+        # current-frame score) against fresh challengers.
+        self.lock_score: float = 0.0
         self.match_votes: dict[int, list[float]] = {}
         self.embedding_buffer: list[np.ndarray] = []
         self.decided: bool = False

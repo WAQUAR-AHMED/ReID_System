@@ -1,13 +1,14 @@
 # CrossCamReid — production runners
 
-This folder ships **three** ways to run the same multi-camera ReID pipeline
+This folder ships **four** ways to run the same multi-camera ReID pipeline
 (YOLOv8 pose + keypoint gating + ReID embeddings + Qdrant SID store):
 
 | Runner | File | Purpose |
 |---|---|---|
 | **CLI** | `app.py` | Local desktop run with cv2 windows. Good for development. |
-| **WebSocket** | `app_server.py` | One client per WebSocket; per-frame JSON detections streamed back. |
+| **WebSocket (ReID)** | `app_server.py` | One client per WebSocket; per-frame JSON detections streamed back. |
 | **HLS HTTP** | `app_hls.py` | Multi-session HTTP API that exposes annotated **HLS playlists** per camera (browser/VLC playback). Mirrors the `ffmpeg_test` API shape. |
+| **People Counting WS** | `app_people_counting.py` | WebSocket API for real-time **people counting + occupancy + alerts** built on top of ReID. See [§4](#4-people-counting--occupancy-runner--app_people_countingpy). |
 
 The three runners share the same code under `src/crosscamreid/` — switching
 between them does not change pipeline behavior.
@@ -230,6 +231,299 @@ NVIDIA hardware + ffmpeg compiled with `--enable-nvenc`, swaps libx264 for
 
 ---
 
+## 4. People-Counting / Occupancy runner — `app_people_counting.py`
+
+Real-time people counting + occupancy tracking + threshold alerting over a
+WebSocket. Runs on top of the **same ReID pipeline** so global IDs (`G1`,
+`G2`, …) are stable across cameras of the same `org_id`.
+
+```bash
+cd production
+uvicorn app_people_counting:app --host 0.0.0.0 --port 8002
+```
+
+### Endpoint
+
+```
+ws://<host>:8002/ws/people_counting/{client_id}?token=<JWT>
+```
+
+- `client_id` — any unique string per client. A second connection using the
+  same `client_id` is rejected while the first is still active.
+- `token` — required. Validated as **HS256 JWT** when env `PC_JWT_SECRET`
+  is set; otherwise any non-empty token is accepted (dev mode; a one-time
+  warning is logged).
+
+### Auth
+
+```bash
+# Production
+export PC_JWT_SECRET=<your-strong-secret>
+
+# Dev — leave PC_JWT_SECRET unset; any non-empty token works
+```
+
+Optional dependencies (lazy-imported):
+
+```bash
+pip install PyJWT      # JWT validation
+pip install boto3      # required for kvs:// stream URLs
+pip install pynvml     # GPU utilisation in the response payload
+```
+
+### Architecture
+
+```
+WebSocket  (one per client)
+     │
+     ▼
+PeopleCountingSession   (max 5 cameras per session)
+     │
+     ├── _CameraWorker (thread per camera)
+     │     • YOLO + RTSPCapture + TIDStateManager
+     │     • process_master(...) reused unchanged from processor.py
+     │     • EntryExitTracker  (new id ⇒ entry; timeout ⇒ exit)
+     │     • OccupancyTracker  (edge-triggered alerts)
+     │     • emits one JSON payload per processed frame
+     │
+     └── OrgRegistry  (process-wide, ref-counted)
+            • per-org_id Qdrant collection: <base>__org<id>
+            • shared SIDStore + ReID backend across cameras of the org
+            • strict cross-org isolation
+```
+
+A single connection can stream up to **5 cameras**; each runs in its own
+thread so a slow stream never stalls the others.
+
+### Inbound messages
+
+**Start streams** (1–5 cameras):
+
+```json
+{
+  "action": "start_stream",
+  "org_id": 10,
+  "user_id": 42,
+
+  "threshold": 50,
+  "alert_rate": 80,
+
+  "fps": 5,
+  "frame_skip": 2,
+
+  "cameras": [
+    { "camera_id": 1, "stream_url": "kvs://CamEntrance01", "region": "ap-south-1" },
+    { "camera_id": 2, "stream_url": "rtsp://192.168.1.10/stream" },
+    { "camera_id": 3, "stream_url": "https://example.com/sample.mp4" }
+  ]
+}
+```
+
+`stream_url` schemes:
+
+| Scheme | Resolved by |
+|---|---|
+| `kvs://<StreamName>` | AWS Kinesis Video Streams → HLS via boto3 (uses `region`) |
+| `rtsp://...` | OpenCV |
+| `http(s)://...` | OpenCV |
+| local path | OpenCV |
+
+**Stop one camera**:
+
+```json
+{ "action": "stop_stream", "org_id": 10, "user_id": 42, "camera_id": 1 }
+```
+
+**Stop all cameras for this connection**:
+
+```json
+{ "action": "stop_all", "org_id": 10, "user_id": 42 }
+```
+
+A connection is bound to the first `org_id` it successfully started. A
+later `start_stream` with a different `org_id` is rejected — reconnect to
+switch tenants.
+
+### Outbound events
+
+**Stream lifecycle**:
+
+```json
+{ "event": "stream_started", "camera_id": 1, "status": "ok",
+  "message": "Stream initialized successfully" }
+
+{ "event": "error", "camera_id": 1, "status": "failed",
+  "error_message": "Unable to connect to stream" }
+
+{ "event": "stream_stopped", "camera_id": 1, "status": "ok",
+  "message": "Camera stopped" }
+
+{ "event": "all_stopped", "status": "ok", "stopped": 3 }
+```
+
+**Per-frame payload** (one per processed frame, per camera; flat schema):
+
+```json
+{
+  "detections": {
+    "camid": 1,
+    "org_id": 10,
+    "userid": 42,
+
+    "Frame_Id": "FR_1_1734456789123",
+    "Time_stamp": "2024-12-17T15:39:49.123456Z",
+    "Frame_Count": 42,
+
+    "Total_people_detected": 3,
+    "Current_occupancy": 3,
+
+    "People_ids":         ["G1", "G3", "G7"],
+    "Entry_time":         ["2024-12-17T15:39:45Z", "...", "..."],
+    "People_dwell_time":  ["00:00:04", "00:00:02", "00:00:00"],
+    "Confidence_scores":  [0.91, 0.87, 0.83],
+    "accuracy":           [0.910, 0.870, 0.830],
+
+    "Exit_time": ["2024-12-17T15:39:47Z"],
+    "exitid":    ["G5"],
+
+    "Total_entries": 15,
+    "Total_exits": 12,
+    "Net_count": 3,
+
+    "Occupancy_percentage": 30.0,
+    "Over_capacity_count": 0,
+    "Max_occupancy": 50,
+    "Average_dwell_time": "00:00:02",
+
+    "Status": "",
+    "is_alert_triggered": false,
+
+    "Processing_Status": 1,
+    "processing_time_ms": 74.5,
+    "gpu_memory_percent": 42.3,
+    "gpu_utilization_percent": 68.0,
+    "reid_gallery_size": 8,
+
+    "annotated_frame": null
+  }
+}
+```
+
+Notes on the schema:
+
+- `People_ids` / `Entry_time` / `People_dwell_time` / `Confidence_scores` /
+  `accuracy` are **parallel arrays** — index `i` describes the same person
+  across all five.
+- `Exit_time` / `exitid` are **parallel arrays** holding the **last 10**
+  exits seen on this camera.
+- `Status` is `""` while normal/approaching, `"High Occupancy"` once
+  occupancy reaches the threshold, and `"Error"` on error frames.
+- `is_alert_triggered` is **edge-triggered** — `true` only on the rising
+  edge into a new alert level.
+- `annotated_frame` is the raw base64 JPEG (no `data:` prefix). It is
+  populated on **every Nth processed frame** (default `N = 20`) and `null`
+  in between, to keep bandwidth bounded.
+
+Frame controls (all optional on `start_stream`):
+
+```json
+{
+  "include_annotated_frame": true,
+  "frame_jpeg_quality":      70,
+  "frame_send_interval":     20
+}
+```
+
+- `include_annotated_frame` — set `false` to disable frame upload entirely.
+- `frame_jpeg_quality` — clamped 30–95.
+- `frame_send_interval` — N. The server emits `annotated_frame` only when
+  `Frame_Count % N == 0`; otherwise the field is `null`.
+
+### Counting / occupancy semantics
+
+- **Entry**: a global ID seen for the first time on a camera since startup
+  (or after a previous exit).
+- **Exit**: an active ID is absent for `exit_timeout_sec` (default `2.0`).
+  Tunable per `start_stream` request via `"exit_timeout_sec": <float>`.
+- **`current_occupancy`**: number of distinct global IDs currently active
+  on the camera.
+- **`net_count`**: `total_entries - total_exits`.
+- **Alert**: `alert_threshold = threshold * alert_rate / 100`. Edge-triggered
+  — the alert fires **once** when occupancy crosses up into a higher level
+  (`approaching_threshold` → `at_threshold` → `over_capacity`) and only re-
+  fires after dropping below that level and crossing it again.
+- **Average dwell**: mean dwell of currently visible people; if nobody is
+  visible, falls back to the mean dwell of the **last 10 exits**.
+- **Annotated frame**: the worker draws bounding boxes + ID labels onto
+  the frame and emits it as `annotated_frame` (base64 JPEG, no `data:`
+  prefix) every `frame_send_interval` processed frames. Disable
+  per-request with `"include_annotated_frame": false`, tune compression
+  with `"frame_jpeg_quality": <30-95>`, or change the cadence with
+  `"frame_send_interval": <int>` (default 20). The field is `null` on
+  intervening frames.
+
+### Performance controls
+
+| Field | Effect |
+|---|---|
+| `fps` | Target processing FPS per camera. Loop sleeps to honor the cap. `0` = no cap. |
+| `frame_skip` | Process 1 frame, skip K. Default `0`. |
+| `threshold` | Capacity used by occupancy/alerts. `0` disables alerts. |
+| `alert_rate` | Percent of `threshold` that triggers `approaching_threshold`. |
+| `exit_timeout_sec` | Seconds an ID can be missing before counted as exited. Default `2.0`. |
+
+### Cross-org isolation
+
+- Each `org_id` owns its own Qdrant collection: `<base>__org<id>`.
+- A `PeopleCountingSession` is bound to one `org_id` for its lifetime.
+- The shared `OrgRegistry` ref-counts org resources but does **not**
+  dispose them when the last session disconnects (a brief reconnect must
+  not wipe the SID gallery).
+
+### Endpoints
+
+| Method | Path | Purpose |
+|---|---|---|
+| `WS` | `/ws/people_counting/{client_id}?token=…` | Main WebSocket. |
+| `GET` | `/health` | Liveness + active session count. |
+
+### Quick smoke test
+
+`wscat` works well for one-off testing:
+
+```bash
+wscat -c "ws://localhost:8002/ws/people_counting/test-1?token=devtoken"
+> {"action":"start_stream","org_id":10,"user_id":42,"threshold":50,"alert_rate":80,"fps":5,"frame_skip":0,"cameras":[{"camera_id":1,"stream_url":"path/to/sample.mp4"}]}
+```
+
+You should immediately receive `stream_started`, then a steady stream of
+`detections` payloads.
+
+### File layout (people-counting only)
+
+```
+production/
+├── app_people_counting.py                          ◄── new
+└── src/crosscamreid/
+    ├── counting/                                   ◄── new
+    │   ├── __init__.py
+    │   ├── entry_exit.py        # per-camera entry/exit tracker
+    │   ├── occupancy.py         # threshold + edge-triggered alerts
+    │   ├── dwell.py             # avg dwell with last-10 fallback
+    │   ├── kvs_resolver.py      # kvs:// → HLS via boto3
+    │   ├── gpu_stats.py         # pynvml → torch → 0.0 fallback
+    │   ├── auth.py              # JWT validator (HS256)
+    │   └── org_registry.py      # per-org SIDStore + ReID backend pool
+    └── websocket/
+        ├── people_counting_runner.py               ◄── new
+        └── people_counting_handler.py              ◄── new
+```
+
+The existing ReID modules (`processor.py`, `state.py`, `store.py`,
+`capture.py`, `reid/*`) are reused **unchanged**.
+
+---
+
 ## Local testing without RTSP cameras
 
 For quick smoke tests, point `source` at a video file or HTTP MP4:
@@ -274,9 +568,10 @@ The same source field accepts a webcam index as a string (e.g. `"0"`).
 ```
 production/
 ├── app.py                                  # CLI runner (cv2 window)
-├── app_server.py                           # WebSocket server
-├── app_hls.py                              # HLS HTTP server  ◄── new
-├── README.md                               # this file        ◄── new
+├── app_server.py                           # ReID WebSocket server
+├── app_hls.py                              # HLS HTTP server
+├── app_people_counting.py                  # People-counting WS server  ◄── new
+├── README.md                               # this file
 ├── config/
 │   └── config.yaml
 ├── hls_out/                                # created at runtime by app_hls.py
@@ -291,8 +586,20 @@ production/
     ├── state.py
     ├── store.py
     ├── database/                           # PostgreSQL persistence
-    ├── websocket/                          # used by app_server.py
-    └── server/                             # used by app_hls.py  ◄── new
+    ├── counting/                           # people-counting layer       ◄── new
+    │   ├── entry_exit.py
+    │   ├── occupancy.py
+    │   ├── dwell.py
+    │   ├── kvs_resolver.py
+    │   ├── gpu_stats.py
+    │   ├── auth.py
+    │   └── org_registry.py
+    ├── websocket/                          # ReID + people-counting handlers
+    │   ├── reid_handler.py
+    │   ├── reid_runner.py
+    │   ├── people_counting_handler.py      ◄── new
+    │   └── people_counting_runner.py       ◄── new
+    └── server/                             # used by app_hls.py
         ├── __init__.py
         ├── ffmpeg_hls.py                   # FFmpegHLSWriter
         └── hls_session.py                  # HLSStreamSession (worker thread)

@@ -84,6 +84,18 @@ class RuntimeConfig:
     sid_persist_on_kp_loss: bool = False
     tid_recover_max_missing_frames: int = 2
     tid_recover_iou_threshold: float = 0.5
+    # Tracker selector. "bytetrack" uses runtime.tracker (default, current
+    # behaviour). "botsort" switches to runtime.botsort_tracker — Kalman +
+    # motion prediction + camera-motion compensation, much sturdier through
+    # crossings and short occlusions.
+    tracker_mode: str = "bytetrack"
+    botsort_tracker: str = "botsort.yaml"
+    # If True, when a detection's bbox heavily overlaps another live track
+    # in the same frame (IoU >= occlusion_iou_thresh), suppress gallery
+    # updates for the occluded track to avoid polluting embeddings with
+    # mixed-identity crops. Match search still runs on the current frame.
+    occlusion_freeze_embeddings: bool = True
+    occlusion_iou_thresh: float = 0.35
 
 
 @dataclass
@@ -188,6 +200,14 @@ def load_config(config_path: str) -> AppConfig:
             sid_persist_on_kp_loss=bool(runtime.get("sid_persist_on_kp_loss", False)),
             tid_recover_max_missing_frames=int(runtime.get("tid_recover_max_missing_frames", 2)),
             tid_recover_iou_threshold=float(runtime.get("tid_recover_iou_threshold", 0.5)),
+            tracker_mode=str(runtime.get("tracker_mode", "bytetrack")).strip().lower(),
+            botsort_tracker=_resolve_tracker_path(
+                base_dir, str(runtime.get("botsort_tracker", "botsort.yaml"))
+            ),
+            occlusion_freeze_embeddings=bool(
+                runtime.get("occlusion_freeze_embeddings", True)
+            ),
+            occlusion_iou_thresh=float(runtime.get("occlusion_iou_thresh", 0.35)),
         ),
     )
 
@@ -215,6 +235,12 @@ def load_config(config_path: str) -> AppConfig:
 
     if not (0.0 <= app_cfg.runtime.tid_recover_iou_threshold <= 1.0):
         raise ValueError("runtime.tid_recover_iou_threshold must be between 0 and 1")
+
+    if app_cfg.runtime.tracker_mode not in {"bytetrack", "botsort"}:
+        raise ValueError("runtime.tracker_mode must be 'bytetrack' or 'botsort'")
+
+    if not (0.0 <= app_cfg.runtime.occlusion_iou_thresh <= 1.0):
+        raise ValueError("runtime.occlusion_iou_thresh must be between 0 and 1")
 
     return app_cfg
 

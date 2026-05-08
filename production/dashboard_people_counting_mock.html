@@ -1,0 +1,867 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>People Counting Dashboard Mock v2 (multi-cam)</title>
+  <style>
+    :root {
+      --bg: #f3f6fb;
+      --panel: #ffffff;
+      --text: #152238;
+      --muted: #5f6f85;
+      --line: #d9e2ee;
+      --brand: #0f6cbd;
+      --ok: #198754;
+      --warn: #b7791f;
+      --bad: #c53030;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: "Trebuchet MS", "Segoe UI", sans-serif;
+      background: linear-gradient(135deg, #e8f0fb 0%, #f8fbff 45%, #eef7f2 100%);
+      color: var(--text);
+    }
+
+    .wrap {
+      max-width: 1480px;
+      margin: 0 auto;
+      padding: 18px;
+    }
+
+    h1 {
+      margin: 0 0 4px 0;
+      font-size: 1.8rem;
+    }
+
+    .sub {
+      margin: 0 0 12px 0;
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 12px;
+      margin-bottom: 12px;
+      box-shadow: 0 4px 12px rgba(10, 40, 80, 0.05);
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(12, 1fr);
+      gap: 8px;
+    }
+
+    .c2 {
+      grid-column: span 2;
+    }
+
+    .c3 {
+      grid-column: span 3;
+    }
+
+    .c4 {
+      grid-column: span 4;
+    }
+
+    .c6 {
+      grid-column: span 6;
+    }
+
+    .c12 {
+      grid-column: span 12;
+    }
+
+    label {
+      font-size: 0.82rem;
+      color: var(--muted);
+      display: block;
+      margin-bottom: 4px;
+    }
+
+    input,
+    textarea,
+    button,
+    select {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      padding: 9px 10px;
+      font-size: 0.92rem;
+      color: var(--text);
+      background: #fff;
+    }
+
+    textarea {
+      min-height: 124px;
+      font-family: Consolas, monospace;
+    }
+
+    .actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .actions button {
+      width: auto;
+      cursor: pointer;
+      font-weight: 600;
+    }
+
+    .primary {
+      background: var(--brand);
+      color: #fff;
+      border-color: #0c5da5;
+    }
+
+    .danger {
+      background: #d9534f;
+      color: #fff;
+      border-color: #b74542;
+    }
+
+    .muted {
+      background: #eef3f9;
+    }
+
+    .status {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 7px 10px;
+      font-size: 0.86rem;
+      background: #fff;
+    }
+
+    .ok {
+      color: var(--ok);
+    }
+
+    .warn {
+      color: var(--warn);
+    }
+
+    .bad {
+      color: var(--bad);
+    }
+
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(6, 1fr);
+      gap: 8px;
+    }
+
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 10px;
+      background: #fff;
+    }
+
+    .k {
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+
+    .v {
+      font-size: 1.3rem;
+      font-weight: 700;
+      margin-top: 3px;
+    }
+
+    .split {
+      display: grid;
+      grid-template-columns: 1.1fr 1fr;
+      gap: 10px;
+    }
+
+    .tbl {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.88rem;
+    }
+
+    .tbl th,
+    .tbl td {
+      border-bottom: 1px solid var(--line);
+      padding: 7px 8px;
+      text-align: left;
+    }
+
+    .tbl th {
+      background: #f7faff;
+      position: sticky;
+      top: 0;
+    }
+
+    .scroll {
+      max-height: 360px;
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+
+    .log {
+      max-height: 360px;
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fdfefe;
+      padding: 7px;
+      font-family: Consolas, monospace;
+      font-size: 0.82rem;
+      line-height: 1.35;
+    }
+
+    /* ── camera input rows ─────────────────────────────────────── */
+    .cam-row {
+      display: grid;
+      grid-template-columns: 110px 1fr 90px;
+      gap: 8px;
+      align-items: end;
+      margin-bottom: 6px;
+    }
+
+    .cam-row .lbl {
+      font-size: 0.78rem;
+      color: var(--muted);
+    }
+
+    .cam-row button.remove {
+      background: #fbecec;
+      border-color: #e3b9b9;
+      color: #b03030;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    /* ── per-camera tiles ──────────────────────────────────────── */
+    .tiles {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(440px, 1fr));
+      gap: 12px;
+    }
+
+    .tile {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #fff;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .tile-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 10px;
+      background: #f7faff;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .tile-head .title {
+      font-weight: 700;
+    }
+
+    .tile-head button {
+      width: auto;
+      padding: 4px 10px;
+      font-size: 0.82rem;
+      cursor: pointer;
+    }
+
+    .video-wrap {
+      position: relative;
+      width: 100%;
+      background: #0a0f17;
+      min-height: 240px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .video-wrap img {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 60vh;
+      object-fit: contain;
+    }
+
+    .video-wrap .placeholder {
+      color: #94a3b8;
+      font-size: 0.88rem;
+      padding: 18px;
+      text-align: center;
+    }
+
+    .video-meta {
+      position: absolute;
+      left: 8px;
+      bottom: 8px;
+      background: rgba(0, 0, 0, 0.55);
+      color: #fff;
+      padding: 4px 8px;
+      border-radius: 6px;
+      font-size: 0.78rem;
+      font-family: Consolas, monospace;
+      pointer-events: none;
+    }
+
+    .tile-stats {
+      display: grid;
+      grid-template-columns: repeat(6, 1fr);
+      gap: 4px;
+      padding: 6px 8px;
+      font-size: 0.78rem;
+    }
+
+    .tile-stats div {
+      background: #f7faff;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 4px 6px;
+      text-align: center;
+    }
+
+    .tile-stats b {
+      display: block;
+      font-size: 0.95rem;
+      color: var(--text);
+    }
+
+    .tile-stats span {
+      color: var(--muted);
+      font-size: 0.72rem;
+    }
+
+    .pill {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 0.74rem;
+      font-weight: 700;
+      background: #eef3f9;
+      color: var(--muted);
+    }
+
+    .pill.live {
+      background: #def7ec;
+      color: #03543f;
+    }
+
+    .pill.alert {
+      background: #fde2e2;
+      color: #9b1c1c;
+    }
+
+    @media (max-width: 960px) {
+
+      .c2,
+      .c3,
+      .c4,
+      .c6 {
+        grid-column: span 12;
+      }
+
+      .cards {
+        grid-template-columns: repeat(2, 1fr);
+      }
+
+      .split {
+        grid-template-columns: 1fr;
+      }
+
+      .tiles {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="wrap">
+    <h1>People Counting Mock Dashboard v2 — multi-camera</h1>
+    <p class="sub">Send up to 5 cameras in a single <code>start_stream</code>. ReID identities are shared across
+      cameras within the same <code>org_id</code>, so global IDs (e.g. <code>G7</code>) match across tiles.</p>
+
+    <div class="panel">
+      <div class="grid">
+        <div class="c3"><label>Host</label><input id="host" value="localhost:8002"></div>
+        <div class="c2"><label>Client ID</label><input id="client_id" value="client-v2"></div>
+        <div class="c3"><label>Token</label><input id="token" value="devtoken"></div>
+        <div class="c2"><label>Org ID</label><input id="org_id" type="number" value="10"></div>
+        <div class="c2"><label>User ID</label><input id="user_id" type="number" value="42"></div>
+
+        <div class="c2"><label>Threshold</label><input id="threshold" type="number" value="50"></div>
+        <div class="c2"><label>Alert Rate</label><input id="alert_rate" type="number" value="80"></div>
+        <div class="c2"><label>FPS</label><input id="fps" type="number" value="20"></div>
+        <div class="c2"><label>Frame Skip</label><input id="frame_skip" type="number" value="0"></div>
+        <div class="c2"><label>Exit Timeout</label><input id="exit_timeout_sec" type="number" step="0.1" value="2.0">
+        </div>
+        <div class="c2">
+          <label>Send Frames</label>
+          <select id="include_annotated_frame">
+            <option value="true" selected>true</option>
+            <option value="false">false</option>
+          </select>
+        </div>
+
+        <div class="c2"><label>JPEG Quality</label><input id="frame_jpeg_quality" type="number" min="30" max="95"
+            value="70"></div>
+        <div class="c2"><label>Frame Every Nth</label><input id="frame_send_interval" type="number" min="1" value="20">
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+        <h3 style="margin:0;">Cameras (max 5)</h3>
+        <button id="btn_add_camera" class="muted" style="width:auto;padding:6px 14px;cursor:pointer;font-weight:600;">+
+          Add Camera</button>
+      </div>
+      <div id="cameras_list"></div>
+    </div>
+
+    <div class="panel">
+      <div class="grid">
+        <div class="c12"><label>Payload Preview</label><textarea id="preview" readonly></textarea></div>
+        <div class="c12">
+          <div class="actions">
+            <button id="btn_connect" class="primary">Connect</button>
+            <button id="btn_start" class="primary">Start Stream</button>
+            <button id="btn_stop_all" class="danger">Stop All</button>
+            <button id="btn_close" class="muted">Disconnect</button>
+            <span id="status" class="status warn">Disconnected</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="cards">
+        <div class="card">
+          <div class="k">Visible (sum)</div>
+          <div class="v" id="m_visible">0</div>
+        </div>
+        <div class="card">
+          <div class="k">Occupancy (sum)</div>
+          <div class="v" id="m_occupancy">0</div>
+        </div>
+        <div class="card">
+          <div class="k">Entries (sum)</div>
+          <div class="v" id="m_entries">0</div>
+        </div>
+        <div class="card">
+          <div class="k">Exits (sum)</div>
+          <div class="v" id="m_exits">0</div>
+        </div>
+        <div class="card">
+          <div class="k">Net (sum)</div>
+          <div class="v" id="m_net">0</div>
+        </div>
+        <div class="card">
+          <div class="k">Active Cameras</div>
+          <div class="v" id="m_cams">0</div>
+        </div>
+      </div>
+      <div style="margin-top:8px;color:var(--muted);font-size:0.84rem;" id="meta">Waiting for data...</div>
+    </div>
+
+    <div class="panel">
+      <h3 style="margin:0 0 8px 0;">Annotated Video — per camera</h3>
+      <div class="tiles" id="tiles">
+        <div class="placeholder" style="color:#94a3b8;padding:18px;">No streams running. Add cameras above and click
+          Start Stream.</div>
+      </div>
+    </div>
+
+    <div class="split">
+      <div class="panel">
+        <h3 style="margin:0 0 8px 0;">People List (across cameras)</h3>
+        <div class="scroll">
+          <table class="tbl">
+            <thead>
+              <tr>
+                <th>Cam</th>
+                <th>Global ID</th>
+                <th>Dwell</th>
+                <th>Confidence</th>
+                <th>Entry</th>
+              </tr>
+            </thead>
+            <tbody id="people_tbody"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="panel">
+        <h3 style="margin:0 0 8px 0;">Logs</h3>
+        <div class="log" id="logs"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const MAX_CAMERAS = 5;
+    let socket = null;
+    // tiles[camId] = { tileEl, imgEl, phEl, metaEl, statsEls, statusPill }
+    const tiles = {};
+    // latestByCam[camId] = last detections payload (used for aggregation + people table)
+    const latestByCam = {};
+
+    const $ = (id) => document.getElementById(id);
+    const t = () => new Date().toLocaleTimeString();
+
+    function log(msg, kind) {
+      const node = document.createElement("div");
+      node.textContent = "[" + t() + "] " + msg;
+      node.style.color = kind === "err" ? "#c53030" : (kind === "ok" ? "#198754" : "#374151");
+      $("logs").prepend(node);
+    }
+
+    function setStatus(txt, cls) {
+      const s = $("status");
+      s.className = "status " + cls;
+      s.textContent = txt;
+    }
+
+    /* ── camera input rows ─────────────────────────────────────── */
+    function addCameraRow(prefill) {
+      const list = $("cameras_list");
+      const rows = list.querySelectorAll(".cam-row");
+      if (rows.length >= MAX_CAMERAS) {
+        log("Max " + MAX_CAMERAS + " cameras allowed", "err");
+        return;
+      }
+      const nextId = prefill?.camera_id ?? (rows.length ? Math.max(...[...rows].map(r =>
+        Number(r.querySelector(".cam-id").value) || 0)) + 1 : 1);
+      const row = document.createElement("div");
+      row.className = "cam-row";
+      row.innerHTML =
+        '<div><div class="lbl">Camera ID</div>' +
+        '<input class="cam-id" type="number" value="' + nextId + '"></div>' +
+        '<div><div class="lbl">Stream URL</div>' +
+        '<input class="cam-url" placeholder="rtsp://..." value="' +
+        (prefill?.stream_url ?? "") + '"></div>' +
+        '<div><div class="lbl">&nbsp;</div>' +
+        '<button class="remove" type="button">Remove</button></div>';
+      list.appendChild(row);
+      row.querySelector(".remove").addEventListener("click", () => {
+        row.remove();
+        refreshPreview();
+      });
+      row.querySelectorAll("input").forEach((el) =>
+        el.addEventListener("input", refreshPreview)
+      );
+      refreshPreview();
+    }
+
+    function readCameras() {
+      const out = [];
+      document.querySelectorAll("#cameras_list .cam-row").forEach((row) => {
+        const id = Number(row.querySelector(".cam-id").value);
+        const url = row.querySelector(".cam-url").value.trim();
+        if (Number.isFinite(id) && url) out.push({ camera_id: id, stream_url: url });
+      });
+      return out;
+    }
+
+    /* ── start_stream payload ──────────────────────────────────── */
+    function startPayload() {
+      return {
+        action: "start_stream",
+        org_id: Number($("org_id").value),
+        user_id: Number($("user_id").value),
+        threshold: Number($("threshold").value),
+        alert_rate: Number($("alert_rate").value),
+        fps: Number($("fps").value),
+        frame_skip: Number($("frame_skip").value),
+        exit_timeout_sec: Number($("exit_timeout_sec").value),
+        include_annotated_frame: $("include_annotated_frame").value === "true",
+        frame_jpeg_quality: Number($("frame_jpeg_quality").value),
+        frame_send_interval: Number($("frame_send_interval").value),
+        cameras: readCameras(),
+      };
+    }
+
+    function refreshPreview() {
+      $("preview").value = JSON.stringify(startPayload(), null, 2);
+    }
+
+    /* ── websocket ─────────────────────────────────────────────── */
+    function wsUrl() {
+      const host = $("host").value.trim();
+      const clientId = encodeURIComponent($("client_id").value.trim());
+      const token = encodeURIComponent($("token").value.trim());
+      return "ws://" + host + "/ws/people_counting/" + clientId + "?token=" + token;
+    }
+
+    function connect() {
+      if (socket && socket.readyState === WebSocket.OPEN) return log("Already connected");
+      socket = new WebSocket(wsUrl());
+      setStatus("Connecting...", "warn");
+      log("Connecting " + wsUrl());
+      socket.onopen = () => { setStatus("Connected", "ok"); log("Connected", "ok"); };
+      socket.onclose = () => {
+        setStatus("Disconnected", "warn"); log("Disconnected");
+        Object.keys(tiles).forEach(markTileDisconnected);
+      };
+      socket.onerror = () => { setStatus("Error", "bad"); log("Socket error", "err"); };
+      socket.onmessage = (e) => {
+        try { onMsg(JSON.parse(e.data)); } catch (_) { log("Non JSON: " + e.data, "err"); }
+      };
+    }
+
+    function send(data) {
+      if (!socket || socket.readyState !== WebSocket.OPEN) return log("Socket not connected", "err");
+      socket.send(JSON.stringify(data));
+      log("Sent action: " + data.action +
+        (data.camera_id != null ? " (cam " + data.camera_id + ")" : ""), "ok");
+    }
+
+    function stopCamera(camId) {
+      send({
+        action: "stop_stream",
+        org_id: Number($("org_id").value),
+        user_id: Number($("user_id").value),
+        camera_id: Number(camId),
+      });
+    }
+
+    /* ── per-camera tiles ──────────────────────────────────────── */
+    function ensureTile(camId) {
+      if (tiles[camId]) return tiles[camId];
+
+      const grid = $("tiles");
+      // remove the initial placeholder, if present
+      const ph = grid.querySelector(".placeholder");
+      if (ph) ph.remove();
+
+      const tile = document.createElement("div");
+      tile.className = "tile";
+      tile.innerHTML =
+        '<div class="tile-head">' +
+        '  <span class="title">Camera ' + camId +
+        '    <span class="pill" data-role="pill">connecting</span></span>' +
+        '  <button class="muted" data-role="stop">Stop</button>' +
+        '</div>' +
+        '<div class="video-wrap">' +
+        '  <div class="placeholder" data-role="ph">Waiting for first annotated frame…</div>' +
+        '  <img alt="cam ' + camId + '" data-role="img" style="display:none">' +
+        '  <div class="video-meta" data-role="meta" style="display:none"></div>' +
+        '</div>' +
+        '<div class="tile-stats">' +
+        '  <div><span>Visible</span><b data-role="visible">0</b></div>' +
+        '  <div><span>Occupancy</span><b data-role="occupancy">0</b></div>' +
+        '  <div><span>Entries</span><b data-role="entries">0</b></div>' +
+        '  <div><span>Exits</span><b data-role="exits">0</b></div>' +
+        '  <div><span>Net</span><b data-role="net">0</b></div>' +
+        '  <div><span>Occ %</span><b data-role="pct">0%</b></div>' +
+        '</div>';
+      grid.appendChild(tile);
+
+      const r = (role) => tile.querySelector('[data-role="' + role + '"]');
+      const refs = {
+        tileEl: tile,
+        imgEl: r("img"),
+        phEl: r("ph"),
+        metaEl: r("meta"),
+        statusPill: r("pill"),
+        stats: {
+          visible: r("visible"),
+          occupancy: r("occupancy"),
+          entries: r("entries"),
+          exits: r("exits"),
+          net: r("net"),
+          pct: r("pct"),
+        },
+      };
+      r("stop").addEventListener("click", () => stopCamera(camId));
+      tiles[camId] = refs;
+      return refs;
+    }
+
+    function markTileDisconnected(camId) {
+      const tile = tiles[camId];
+      if (!tile) return;
+      tile.statusPill.textContent = "stopped";
+      tile.statusPill.className = "pill";
+    }
+
+    function removeTile(camId) {
+      const tile = tiles[camId];
+      if (!tile) return;
+      tile.tileEl.remove();
+      delete tiles[camId];
+      delete latestByCam[camId];
+      // restore placeholder if no tiles left
+      const grid = $("tiles");
+      if (!grid.querySelector(".tile")) {
+        grid.innerHTML =
+          '<div class="placeholder" style="color:#94a3b8;padding:18px;">' +
+          'No streams running. Add cameras above and click Start Stream.</div>';
+      }
+      renderAggregates();
+      renderPeopleTable();
+    }
+
+    function renderTile(d) {
+      const camId = d.camid;
+      const tile = ensureTile(camId);
+
+      tile.statusPill.textContent = d.is_alert_triggered ? "alert" : "live";
+      tile.statusPill.className = "pill " + (d.is_alert_triggered ? "alert" : "live");
+
+      tile.stats.visible.textContent = d.Total_people_detected ?? 0;
+      tile.stats.occupancy.textContent = d.Current_occupancy ?? 0;
+      tile.stats.entries.textContent = d.Total_entries ?? 0;
+      tile.stats.exits.textContent = d.Total_exits ?? 0;
+      tile.stats.net.textContent = d.Net_count ?? 0;
+      tile.stats.pct.textContent = (Number(d.Occupancy_percentage ?? 0).toFixed(1)) + "%";
+
+      const b64 = d.annotated_frame;
+      if (b64) {
+        tile.imgEl.src = "data:image/jpeg;base64," + b64;
+        tile.imgEl.style.display = "block";
+        tile.phEl.style.display = "none";
+        tile.metaEl.style.display = "block";
+        tile.metaEl.textContent =
+          "cam=" + (d.camid ?? "-") +
+          "  frame#=" + (d.Frame_Count ?? "-") +
+          "  proc=" + (d.processing_time_ms ?? "-") + "ms" +
+          "  vis=" + (d.Total_people_detected ?? 0) +
+          "  occ=" + (d.Current_occupancy ?? 0);
+      }
+    }
+
+    /* ── aggregate summary across cameras ──────────────────────── */
+    function renderAggregates() {
+      const cams = Object.values(latestByCam);
+      const sum = (k) => cams.reduce((a, d) => a + (Number(d[k]) || 0), 0);
+      $("m_visible").textContent = sum("Total_people_detected");
+      $("m_occupancy").textContent = sum("Current_occupancy");
+      $("m_entries").textContent = sum("Total_entries");
+      $("m_exits").textContent = sum("Total_exits");
+      $("m_net").textContent = sum("Net_count");
+      $("m_cams").textContent = cams.length;
+
+      if (!cams.length) {
+        $("meta").textContent = "Waiting for data...";
+        return;
+      }
+      const camIds = Object.keys(latestByCam).sort((a, b) => Number(a) - Number(b));
+      const alerting = cams.filter((d) => d.is_alert_triggered).map((d) => d.camid);
+      $("meta").textContent =
+        "Cams [" + camIds.join(", ") + "]" +
+        (alerting.length ? "  |  ALERT on " + alerting.join(", ") : "");
+    }
+
+    function renderPeopleTable() {
+      const tb = $("people_tbody");
+      tb.innerHTML = "";
+      const camIds = Object.keys(latestByCam).sort((a, b) => Number(a) - Number(b));
+      for (const camId of camIds) {
+        const d = latestByCam[camId];
+        const ids = d.People_ids || [];
+        const dwell = d.People_dwell_time || [];
+        const conf = d.Confidence_scores || [];
+        const entries = d.Entry_time || [];
+        for (let i = 0; i < ids.length; i++) {
+          const tr = document.createElement("tr");
+          tr.innerHTML =
+            "<td>" + camId + "</td>" +
+            "<td>" + (ids[i] ?? "-") + "</td>" +
+            "<td>" + (dwell[i] ?? "-") + "</td>" +
+            "<td>" + (conf[i] ?? "-") + "</td>" +
+            "<td>" + (entries[i] ?? "-") + "</td>";
+          tb.appendChild(tr);
+        }
+      }
+    }
+
+    /* ── inbound message dispatch ──────────────────────────────── */
+    function onMsg(m) {
+      if (m.event) {
+        const camStr = m.camera_id != null ? " (cam " + m.camera_id + ")" : "";
+        log("Event " + m.event + camStr +
+          (m.message ? " - " + m.message : ""),
+          m.event === "error" ? "err" : "ok");
+        if (m.error_message) log("  -> " + m.error_message, "err");
+
+        if (m.event === "stream_started" && m.camera_id != null) {
+          ensureTile(m.camera_id);
+        }
+        if (m.event === "stream_stopped" && m.camera_id != null) {
+          removeTile(m.camera_id);
+        }
+        if (m.event === "all_stopped") {
+          Object.keys(tiles).forEach((id) => removeTile(Number(id)));
+        }
+        if (m.event === "error" && m.camera_id != null) {
+          const tile = tiles[m.camera_id];
+          if (tile) {
+            tile.statusPill.textContent = "error";
+            tile.statusPill.className = "pill alert";
+          }
+        }
+        return;
+      }
+
+      if (!m.detections) return log("Unhandled payload", "err");
+      const d = m.detections;
+      latestByCam[d.camid] = d;
+
+      renderTile(d);
+      renderAggregates();
+      renderPeopleTable();
+
+      if (d.is_alert_triggered) {
+        log("ALERT cam=" + d.camid + ": " + (d.Status || "triggered"), "err");
+      }
+    }
+
+    /* ── wiring ────────────────────────────────────────────────── */
+    $("btn_connect").onclick = connect;
+    $("btn_start").onclick = () => {
+      const p = startPayload();
+      if (!p.cameras.length) return log("Add at least one camera", "err");
+      send(p);
+    };
+    $("btn_stop_all").onclick = () => send({
+      action: "stop_all",
+      org_id: Number($("org_id").value),
+      user_id: Number($("user_id").value),
+    });
+    $("btn_close").onclick = () => { if (socket) socket.close(); };
+    $("btn_add_camera").onclick = () => addCameraRow();
+
+    [
+      "org_id", "user_id", "threshold", "alert_rate", "fps", "frame_skip",
+      "exit_timeout_sec",
+      "include_annotated_frame", "frame_jpeg_quality", "frame_send_interval",
+    ].forEach((id) => {
+      const el = $(id);
+      const evt = el.tagName === "SELECT" ? "change" : "input";
+      el.addEventListener(evt, refreshPreview);
+    });
+
+    // seed with the example single-camera config from the spec
+    addCameraRow({
+      camera_id: 1,
+      stream_url: "rtsp://admin:industry4@192.168.1.8:554/cam/realmonitor?channel=1&subtype=0",
+    });
+  </script>
+</body>
+
+</html>

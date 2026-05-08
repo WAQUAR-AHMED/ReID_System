@@ -1,0 +1,31 @@
+# Tuned BoT-SORT config for TID consistency through occlusions and crossings.
+#
+# Use case: cross-camera person ReID where ByteTrack's pure-IoU association
+# loses identities when paths cross. BoT-SORT adds:
+#   * Kalman-filter motion prediction (predicts next bbox from velocity)
+#   * Camera-motion compensation via GMC (sparse optical flow)
+#   * Two-stage association with a configurable proximity / appearance gate
+#
+# Differences vs ultralytics' bundled botsort.yaml:
+#   track_buffer:        30      -> 90       (longer survival through occlusion)
+#   new_track_thresh:    0.25    -> 0.60     (don't spawn IDs for shaky detections)
+#   match_thresh:        0.8     -> 0.85     (slightly stricter IoU on top of motion)
+#   proximity_thresh:    0.5     -> 0.5      (Kalman gating — kept at default)
+#   appearance_thresh:   0.25    -> 0.25     (kept; only used if with_reid=true)
+#   gmc_method:          sparseOptFlow      (camera-motion compensation on)
+#   with_reid:           false              (we run our own ReID via SIDStore
+#                                            after tracking; avoid loading
+#                                            ultralytics' separate ReID model)
+
+tracker_type: botsort
+track_high_thresh: 0.25
+track_low_thresh:  0.10
+new_track_thresh:  0.60
+track_buffer:      90
+match_thresh:      0.85
+fuse_score:        true
+
+gmc_method:        sparseOptFlow
+proximity_thresh:  0.5
+appearance_thresh: 0.25
+with_reid:         false
