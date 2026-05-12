@@ -9,3 +9,4 @@ DATASETS:
   TESTS: ("Market1501",)
 
 OUTPUT_DIR: logs/market1501/bagtricks_R50-ibn
+
